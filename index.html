@@ -1,0 +1,178 @@
+"""Build a self-contained portfolio preview with the certifications section injected.
+
+Takes the deployed page's rendered HTML, reveals the elements framer-motion would
+have animated in, injects the new section after #experience, and rewrites every
+asset to a file published beside the page (artifacts block external assets).
+"""
+import json
+import re
+
+SCRAPE = (
+    r"C:\Users\Jaypee Caldamo\.claude\projects\D--Root-Claude"
+    r"\aa13b5b3-9bc7-40a2-85cd-cada7fd96468\tool-results"
+    r"\mcp-0b06fb11-6745-4ab9-80a9-da58172c87d7-firecrawl_scrape-1790745861074.txt"
+)
+LIVE = "https://jaypee-caldamo-portfolio.vercel.app"
+
+html = json.load(open(SCRAPE, encoding="utf-8"))["html"]
+css = open("live.css", encoding="utf-8").read()
+
+# The JS bundle is not included, so anything framer-motion parked at opacity:0
+# would never animate in. Reveal it.
+html = re.sub(r'style="opacity: 0; transform: translateY\(-?[\d.]+px\);?"', 'style=""', html)
+html = re.sub(r"opacity: 0;\s*transform: translateY\(-?[\d.]+px\);?", "", html)
+html = html.replace('style="opacity: 0"', 'style=""').replace('style="opacity: 0;"', 'style=""')
+
+CERTS = [
+    ("marketing-all-rounder", "Marketing All-Rounder"),
+    ("digital-marketer", "Digital Marketer"),
+    ("content-marketer", "Content Marketer"),
+    ("social-media-manager", "Social Media Manager"),
+    ("email-marketing-coordinator", "Email Marketing Coordinator"),
+    ("seo-coordinator", "SEO Coordinator"),
+    ("facebook-ads-specialist", "Facebook Ads Specialist"),
+    ("linkedin-assistant", "LinkedIn Assistant"),
+    ("ai-implementer", "AI Implementer"),
+    ("graphic-designer", "Graphic Designer"),
+    ("video-editor", "Video Editor"),
+]
+
+CARD = (
+    '<li><button data-i="{i}" aria-haspopup="dialog" class="group relative flex h-full w-full '
+    'flex-col items-center overflow-hidden rounded-3xl hairline bg-deep-900/40 p-5 text-center '
+    'transition-colors duration-500 hover:bg-deep-800/50 sm:p-6">'
+    '<div class="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full opacity-0 '
+    'blur-3xl transition-opacity duration-500 group-hover:opacity-100" aria-hidden="true" '
+    'style="background: radial-gradient(circle, rgba(35,57,93,.85), transparent 70%);"></div>'
+    '<img src="certifications/{slug}.png" alt="{title} — SkillBuilder certification badge" '
+    'loading="lazy" decoding="async" width="400" height="400" '
+    'class="relative transition-transform duration-500 group-hover:scale-105" />'
+    '<span class="relative mt-4 text-sm font-semibold leading-snug text-paper">{title}</span>'
+    '<span class="relative mt-1 text-[0.62rem] uppercase tracking-label text-paper-muted">'
+    "SkillBuilder</span></button></li>"
+)
+
+cards = "".join(
+    CARD.format(i=i, slug=slug, title=title) for i, (slug, title) in enumerate(CERTS)
+)
+
+section = (
+    '<section id="certifications" class="relative mx-auto max-w-6xl px-6 py-24 sm:py-32">'
+    '<div class="max-w-2xl">'
+    '<span class="inline-flex items-center gap-2 text-[0.68rem] font-semibold uppercase '
+    'tracking-label text-steel-300"><span class="h-px w-6 bg-steel-400/50" aria-hidden="true">'
+    "</span>Certifications</span>"
+    '<h2 class="mt-5 font-serif text-4xl leading-[1.05] text-white sm:text-5xl">'
+    "Trained, tested and certified.</h2>"
+    '<p class="mt-4 text-base leading-relaxed text-paper/70">Eleven completed SkillBuilder '
+    "programmes across marketing, design and AI — the groundwork behind every system I build "
+    "for a client.</p></div>"
+    '<ul class="mt-12 grid gap-4 sm:gap-5">' + cards + "</ul></section>"
+)
+
+start = html.find('id="experience"')
+nxt = html.find("<section", start + 10)
+assert start != -1 and nxt != -1, "injection point not found"
+html = html[:nxt] + section + html[nxt:]
+
+nav_exp = (
+    f'<a href="{LIVE}/#experience" class="text-sm font-medium text-paper/75 '
+    'transition-colors hover:text-paper">Experience</a>'
+)
+cert_link = (
+    '<a href="#certifications" class="text-sm font-medium text-paper/75 '
+    'transition-colors hover:text-paper">Certifications</a>'
+)
+assert nav_exp in html, "nav anchor not found"
+html = html.replace(nav_exp, nav_exp + cert_link, 1)
+
+# Artifacts supply their own document skeleton.
+html = re.sub(r'^<!DOCTYPE html><html lang="en">\s*<body>', "", html)
+html = re.sub(r"</body>\s*</html>\s*$", "", html.strip())
+
+# Every asset must resolve to a file published beside the page.
+html = html.replace(LIVE + "/assets/", "assets/")
+html = html.replace(LIVE + "/hero.mp4", "hero.mp4")
+html = html.replace(LIVE + "/#", "#")
+html = re.sub(r'\ssrc="cid:[^"]*"', "", html)
+
+# The résumé button: a download link is inert inside the artifact viewer, so drop the
+# attribute and let it open the live PDF in a new tab instead.
+html = html.replace(' download=""', "")
+
+viewer = (
+    '<div id="lb" class="fixed inset-0 z-[120] items-center justify-center p-4 sm:p-6" hidden>'
+    '<button id="lb-bd" aria-label="Close" class="absolute inset-0 h-full w-full cursor-default '
+    'border-0 bg-ink-950/90 backdrop-blur-md"></button>'
+    '<div class="relative w-full max-w-md rounded-3xl hairline bg-deep-900/80 p-8 text-center" '
+    'role="dialog" aria-modal="true" aria-labelledby="lb-t">'
+    '<button id="lb-x" aria-label="Close" class="absolute right-4 top-4 grid h-9 w-9 '
+    'place-items-center rounded-full text-paper/60 hover:bg-paper/10 hover:text-paper">'
+    "&#10005;</button>"
+    '<img id="lb-img" alt="" width="400" height="400" class="mx-auto" />'
+    '<h3 id="lb-t" class="mt-6 font-serif text-3xl leading-tight text-white"></h3>'
+    '<p class="mt-2 text-[0.68rem] font-semibold uppercase tracking-label text-steel-300">'
+    "Course completed &middot; SkillBuilder</p>"
+    '<div class="mt-7 flex items-center justify-center gap-5">'
+    '<button id="lb-p" aria-label="Previous certification" class="grid h-9 w-9 place-items-center '
+    'rounded-full hairline text-paper/70 hover:text-paper">&#8249;</button>'
+    '<span id="lb-c" class="text-xs text-paper-muted"></span>'
+    '<button id="lb-n" aria-label="Next certification" class="grid h-9 w-9 place-items-center '
+    'rounded-full hairline text-paper/70 hover:text-paper">&#8250;</button>'
+    "</div></div></div>"
+)
+
+script = (
+    "<script>(function(){var C=" + json.dumps(CERTS) + ";"
+    'var lb=document.getElementById("lb"),k=null,last=null;'
+    "function paint(){var c=C[k],img=document.getElementById(\"lb-img\");"
+    'img.src="certifications/"+c[0]+".png";'
+    'img.alt=c[1]+" \\u2014 SkillBuilder certification badge";'
+    'document.getElementById("lb-t").textContent=c[1];'
+    'document.getElementById("lb-c").textContent=(k+1)+" / "+C.length;}'
+    "function open(i){last=document.activeElement;k=i;paint();lb.hidden=false;"
+    'lb.classList.add("flex");document.body.style.overflow="hidden";'
+    'document.getElementById("lb-x").focus();}'
+    'function close(){lb.hidden=true;lb.classList.remove("flex");k=null;'
+    'document.body.style.overflow="";if(last)last.focus();}'
+    "function step(d){if(k===null)return;k=(k+d+C.length)%C.length;paint();}"
+    'document.getElementById("certifications").addEventListener("click",function(e){'
+    'var b=e.target.closest("button[data-i]");if(b)open(+b.dataset.i);});'
+    'document.getElementById("lb-x").onclick=close;'
+    'document.getElementById("lb-bd").onclick=close;'
+    'document.getElementById("lb-p").onclick=function(){step(-1);};'
+    'document.getElementById("lb-n").onclick=function(){step(1);};'
+    'addEventListener("keydown",function(e){if(lb.hidden)return;'
+    'if(e.key==="Escape")close();if(e.key==="ArrowRight")step(1);'
+    'if(e.key==="ArrowLeft")step(-1);});})();</script>'
+)
+
+head = (
+    "<title>Jaypee Caldamo Portfolio</title>\n"
+    '<link rel="preconnect" href="https://fonts.googleapis.com" />\n'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n'
+    '<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300;0,400;'
+    "0,500;0,600;0,700;0,800;1,400&family=Instrument+Serif:ital@0;1&display=swap\" "
+    'rel="stylesheet" />\n'
+    "<style>\n" + css + "\n"
+    # Committed single dark look: the host paints its own ground behind the page,
+    # so the background and colour-scheme are stated explicitly.
+    ":root{color-scheme:dark}html{scroll-behavior:smooth}body{background:#05080f;margin:0}\n"
+    "#lb[hidden]{display:none!important}\n"
+    # Utilities the deployed CSS never shipped because the live site does not use them.
+    # Tailwind generates these in the real build once it scans Certifications.tsx.
+    "#certifications ul{grid-template-columns:repeat(2,minmax(0,1fr))}\n"
+    "@media(min-width:640px){#certifications ul{grid-template-columns:repeat(3,minmax(0,1fr))}}\n"
+    "@media(min-width:1024px){#certifications ul{grid-template-columns:repeat(4,minmax(0,1fr))}}\n"
+    "#certifications ul img{width:6rem;max-width:100%}\n"
+    "@media(min-width:640px){#certifications ul img{width:7rem}}\n"
+    "#lb-img{width:13rem;max-width:70%;height:auto}\n"
+    "#lb-c{font-variant-numeric:tabular-nums}\n"
+    "</style>\n"
+)
+
+out = head + html + viewer + script
+with open("portfolio-preview.html", "w", encoding="utf-8") as fh:
+    fh.write(out)
+
+print("wrote portfolio-preview.html", round(len(out.encode("utf-8")) / 1024, 1), "KB")
